@@ -1,0 +1,11 @@
+int num;
+
+
+void main() {
+   do {
+    		write("Informe um numero <= 0: ");
+    		read( num );
+    		write("Valor lido: ", num);
+   } while ( num > 0 );        
+ }
+
