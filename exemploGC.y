@@ -90,10 +90,17 @@ cmd : exp ';' {
           System.out.println("\tCMPL $0, %EAX");
           System.out.printf("\tJE rot_%02d\n", pRot.peek() + 1); /* Salto p/ fim (break) */
       } cmd {
-          System.out.printf("\tJMP rot_%02d\n", pRot.peek()); /* Volta ao início (base) */
-          System.out.printf("rot_%02d:\n", pRot.peek() + 1); /* Rótulo de fim (break) */
-          pRot.pop();
-      }
+            /* rótulo do CONTINUE (base+2) */
+            System.out.printf("rot_%02d:\n", pRot.peek() + 2);
+
+            /* volta ao início do while */
+            System.out.printf("\tJMP rot_%02d\n", pRot.peek());
+
+            /* rótulo de fim (break) */
+            System.out.printf("rot_%02d:\n", pRot.peek() + 1);
+
+            pRot.pop();
+     }
     | DO {
           /* Aloca 3 rótulos: base (corpo), base+1 (fim/break), base+2 (teste/continue) */
           int base = proxRot;
@@ -111,39 +118,41 @@ cmd : exp ';' {
           pRot.pop();
       }
 
-    /* -------- FOR (corrigido e integrado) -------- */
-    | FOR '(' for_init ';' for_cond ';' for_update ')' 
+   | FOR '(' 
       {
-          /* determina base de rótulos para este for: start=base, end=base+1, update=base+2 */
+          /* reset indispensável para evitar vazamento entre for's */
+          currentCondCode = "";
+          currentUpdateCode = "";
+      }
+      for_init ';' for_cond ';' for_update ')'
+      {
           int base = proxRot;
           proxRot += 3;
           pRot.push(base);
 
-          /* rótulo de início do loop */
           System.out.printf("rot_%02d:\n", base);
 
-          /* condição (pode ser vazia -> for(;;)) */
           if (!currentCondCode.equals("")) {
               System.out.print(currentCondCode);
               System.out.println("\tPOPL %EAX");
               System.out.println("\tCMPL $0, %EAX");
-              System.out.printf("\tJE rot_%02d\n", base + 1); /* salta para fim do loop */
+              System.out.printf("\tJE rot_%02d\n", base + 1);
           }
       }
       cmd
       {
-          /* ao terminar o corpo, rótulo de update (usado por 'continue') */
           int base = pRot.peek();
-          System.out.printf("rot_%02d:\n", base + 2);          /* rot_base_update */
-          /* imprime update (se houver) */
+          System.out.printf("rot_%02d:\n", base + 2);
           System.out.print(currentUpdateCode);
-          System.out.printf("\tJMP rot_%02d\n", base);        /* volta ao início */
-          System.out.printf("rot_%02d:\n", base + 1);         /* rótulo de saída (fim do loop) */
+          System.out.printf("\tJMP rot_%02d\n", base);
+          System.out.printf("rot_%02d:\n", base + 1);
 
           pRot.pop();
+          /* aqui o reset continua, sem problemas */
           currentCondCode = "";
           currentUpdateCode = "";
       }
+
 
     | IF '(' exp {
           /* Use pilha separada para IFs para não conflitar com pRot (que é usada por laços) */
@@ -299,14 +308,25 @@ exp : NUM { System.out.println("\tPUSHL $"+$1); }
           System.out.println("\tMOVL %EAX, (%EDX)");
           System.out.println("\tPUSHL %EAX");
       }
-    /* ATRIBUIÇÕES COMPOSTAS */
-    | lvalue PLUSEQ exp {
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tADDL (%EDX), %EAX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-          System.out.println("\tPUSHL %EAX");
-      }
+   /* ATRIBUIÇÕES COMPOSTAS - PLUSEQ corrigido */
+    | ID
+    { /* quando reduzimos o ID do LHS: empilha endereço e, em seguida, o valor atual
+         assim preservamos o "old LHS value" antes que o RHS seja avaliado */
+      System.out.println("\tPUSHL $_" + $1);
+      System.out.println("\tPUSHL _" + $1);
+    }
+  PLUSEQ exp
+    {
+      /* pilha agora (top -> bottom): RHS_value, old_value, address
+         queremos: result = old_value + RHS_value
+      */
+      System.out.println("\tPOPL %EAX"); /* RHS_value */
+      System.out.println("\tPOPL %EBX"); /* old_value */
+      System.out.println("\tPOPL %EDX"); /* endereço (LHS) */
+      System.out.println("\tADDL %EBX, %EAX"); /* EAX = RHS + old */
+      System.out.println("\tMOVL %EAX, (%EDX)");  /* grava no LHS */
+      System.out.println("\tPUSHL %EAX"); /* empilha resultado como valor da expressão */
+    }
     | lvalue MINUSEQ exp {
           System.out.println("\tPOPL %EAX");
           System.out.println("\tPOPL %EDX");
@@ -465,7 +485,9 @@ public void gcExpLog(int op) {
 }
 public void gcExpNot() {
     System.out.println("\tPOPL %EAX");
-    System.out.println("\tNEGL %EAX");
+    System.out.println("\tCMPL $0, %EAX");
+    System.out.println("\tMOVL $0, %EAX");
+    System.out.println("\tSETE %AL");
     System.out.println("\tPUSHL %EAX");
 }
 private void geraInicio() {
