@@ -1,0 +1,19 @@
+struct Pessoa {
+  int idade;
+  int peso;
+  int notas[3];
+};
+
+int v[4];
+struct Pessoa turma[3];
+
+void main() {
+  v[0] = 5;
+  v[1] = 7;
+  v[2] = 9;
+  v[3] = 11;
+
+  write("v[0] = ", v[0]);
+  write("v[3] = ", v[3]);
+  write("soma = ", v[0] + v[3]);
+}

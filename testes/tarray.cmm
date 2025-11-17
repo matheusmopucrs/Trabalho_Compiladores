@@ -1,0 +1,14 @@
+int v[3];
+int i;
+int x;
+
+void main() {
+    v[0] = 10;
+    v[1] = 20;
+    v[2] = 30;
+
+    i = 1;
+    x = v[i];
+
+    write("x = ", x);
+}

@@ -1,0 +1,16 @@
+int v[4];
+int x;
+int y;
+
+void main() {
+  v[0] = 5;
+  v[1] = 7;
+  v[2] = 9;
+  v[3] = 11;
+
+  x = v[0] + v[1];
+  y = v[2] + v[3];
+
+  write("x = ", x);
+  write("y = ", y);
+}

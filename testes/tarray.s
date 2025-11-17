@@ -1,51 +1,60 @@
 .text
+
+#	 nome COMPLETO e matricula dos componentes do grupo...
+#
+
 .GLOBL _start
 
+
 _start:
+	PUSHL $0
+	PUSHL $10
+	POPL %EAX
+	POPL %ECX
+	MOVL %EAX, _v(,%ECX,4)
+	PUSHL $1
+	PUSHL $20
+	POPL %EAX
+	POPL %ECX
+	MOVL %EAX, _v(,%ECX,4)
+	PUSHL $2
+	PUSHL $30
+	POPL %EAX
+	POPL %ECX
+	MOVL %EAX, _v(,%ECX,4)
+	PUSHL $1
+	POPL %EDX
+	MOVL %EDX, _i
+	PUSHL %EDX
+	PUSHL _i
+	POPL %ECX
+	MOVL _v(,%ECX,4), %EAX
+	PUSHL %EAX
+	POPL %EDX
+	MOVL %EDX, _x
+	PUSHL %EDX
 	MOVL $_str_0Len, %EDX
 	MOVL $_str_0, %ECX
 	CALL _writeLit
-	CALL _writeln
-	PUSHL $_i
-	PUSHL $1
-	POPL %EAX
-	POPL %EDX
-	MOVL %EAX, (%EDX)
-	PUSHL %EAX
-	POPL %EAX
-rot_01:
-	PUSHL _i
-	PUSHL $10
-	POPL %EAX
-	POPL %EDX
-	CMPL %EAX, %EDX
-	MOVL $0, %EAX
-	SETLE %AL
-	PUSHL %EAX
-	POPL %EAX
-	CMPL $0, %EAX
-	JE rot_02
-	PUSHL _i
-	MOVL $_str_1Len, %EDX
-	MOVL $_str_1, %ECX
-	CALL _writeLit
+	PUSHL _x
 	POPL %EAX
 	CALL _write
 	CALL _writeln
-rot_03:
-	PUSHL _i
-	PUSHL $_i
-	POPL %EDX
-	POPL %EAX
-	ADDL $1, %EAX
-	MOVL %EAX, (%EDX)
-	SUBL $1, %EAX
-	JMP rot_01
-rot_02:
 
+
+
+#
+# devolve o controle para o SO (final da main)
+#
 	mov $0, %ebx
 	mov $1, %eax
 	int $0x80
+
+
+#
+# Funcoes da biblioteca (IO)
+#
+
 
 _writeln:
 	MOVL $__fim_msg, %ECX
@@ -113,13 +122,29 @@ _fimread:
 	NEGL %EAX
 _fimread2:
 	RET
-.data
-_i:	.zero 4
-_j:	.zero 4
-__msg:	.zero 30
-__fim_msg:	.byte 0
 
-_str_0:	.ascii "> teste 1 "
+
+
+#
+# area de dados
+#
+.data
+#
+# variaveis globais
+#
+_v:	.zero 12
+_i:	.zero 4
+_x:	.zero 4
+
+#
+# area de literais
+#
+__msg:
+	.zero 30
+__fim_msg:
+	.byte 0
+
+
+_str_0:
+	 .ascii "x = "
 _str_0Len = . - _str_0
-_str_1:	.ascii " i: "
-_str_1Len = . - _str_1
