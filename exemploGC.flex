@@ -1,93 +1,97 @@
 %%
+
 %byaccj
+
 %{
   private Parser yyparser;
+
   public Yylex(java.io.Reader r, Parser yyparser) {
     this(r);
     this.yyparser = yyparser;
     yyline = 1;
   }
+
+
   public int getLine() {
       return yyline;
   }
+
 %}
 
 NUM = [0-9]+
 NL  = \n | \r | \r\n
+
 %%
 
-"$TRACE_ON"   { yyparser.setDebug(true); }
-"$TRACE_OFF"  { yyparser.setDebug(false); }
-"$MOSTRA_TS"  { yyparser.listarTS(); }
 
-{NL}          { yyline++; }
-[ \t]+        { }
+"$TRACE_ON"  { yyparser.setDebug(true);  }
+"$TRACE_OFF" { yyparser.setDebug(false); }
+"$MOSTRA_TS" { yyparser.listarTS(); }
 
-/* ---------- OPERADORES COMPOSTOS (PRIMEIRO!) ---------- */
-"+=" { return Parser.PLUSEQ; }
-"-=" { return Parser.MINUSEQ; }
-"*=" { return Parser.MULEQ; }
-"/=" { return Parser.DIVEQ; }
-"%=" { return Parser.MODEQ; }
-"==" { return Parser.EQ; }
-"<=" { return Parser.LEQ; }
-">=" { return Parser.GEQ; }
-"!=" { return Parser.NEQ; }
-"++" { return Parser.INC; }
-"--" { return Parser.DEC; }
-"&&" { return Parser.AND; }
-"||" { return Parser.OR; }
-"?"  { return '?'; }
-":"  { return ':'; }
 
-/* operadores simples */
+{NL}   {yyline++;}
+[ \t]+ { }
+
+"++"   { return Parser.INC; }
+"--"   { return Parser.DEC; }
+"+="   { return Parser.ADDEQ; }
+
+/* operadores */
+
+"?" |
+":" |
 "+" |
 "-" |
-"*" |
-"/" |
-"%" |
+"*" | 
+"/" | 
+"%" | 
 ">" |
 "<" |
 "=" |
 "!" |
 ";" |
-"(" |
+"(" | 
 ")" |
 "{" |
 "}" |
 "," |
-"\[" |
-"\]" { return (int) yycharat(0); }
+"\[" | 
+"\]"    { return (int) yycharat(0); }
 
-{NUM} { yyparser.yylval = new ParserVal(yytext());
-        return Parser.NUM; }
+{NUM}  { yyparser.yylval = new ParserVal(yytext()); 
+         return Parser.NUM; }
 
-/* ---------- PALAVRAS-CHAVE ---------- */
-int      { return Parser.INT; }
-float    { return Parser.FLOAT; }
-bool     { return Parser.BOOL; }
-void     { return Parser.VOID; }
-main     { return Parser.MAIN; }
-write    { return Parser.WRITE; }
-read     { return Parser.READ; }
-while    { return Parser.WHILE; }
-do       { return Parser.DO; }
-for      { return Parser.FOR; }
-if       { return Parser.IF; }
-else     { return Parser.ELSE; }
-true     { return Parser.TRUE; }
-false    { return Parser.FALSE; }
-break    { return Parser.BREAK; }      /* <--- ADICIONADO */
-continue { return Parser.CONTINUE; }  /* <--- ADICIONADO */
+"=="   {  return Parser.EQ; }
+"<="   {  return Parser.LEQ; }
+">="   {  return Parser.GEQ; }
+"!="   {  return Parser.NEQ; }
 
-[a-zA-Z]+([a-zA-Z0-9]+)? {
-         yyparser.yylval = new ParserVal(yytext());
-         return Parser.ID;
-       }
+"&&"   { return Parser.AND; }
+"||"   {  return Parser.OR; }
 
-\"[^\n]+\" {
-         yyparser.yylval = new ParserVal(yytext().substring(1, yylength()-1));
-         return Parser.LIT;
-       }
+do     { return Parser.DO; }
+int    { return Parser.INT;     }
+float  { return Parser.FLOAT;   }
+bool   { return Parser.BOOL; }
+void   { return Parser.VOID; }
+main   { return Parser.MAIN; }
+write   { return Parser.WRITE; }
+read   { return Parser.READ; }
+while   { return Parser.WHILE; }
+if   { return Parser.IF; }
+else   { return Parser.ELSE; }
+true   { return Parser.TRUE; }
+false   { return Parser.FALSE; }
+break   { return Parser.BREAK; }
+continue { return Parser.CONTINUE; }
+for    { return Parser.FOR; }
 
-[^] { System.err.println("Error: unexpected character '"+yytext()+"'"); return -1; }
+
+
+[a-zA-Z]+([a-zA-Z0-9]+)? { yyparser.yylval = new ParserVal(yytext());
+            return Parser.ID; }
+
+\"[^\n]+\" { yyparser.yylval = new ParserVal(yytext().substring(1, yylength() -1));
+	     return Parser.LIT; }
+
+[^]    { System.err.println("Error: unexpected character '"+yytext()+"'"); return -1; }

@@ -2,502 +2,604 @@
   import java.io.*;
   import java.util.ArrayList;
   import java.util.Stack;
-  import java.io.ByteArrayOutputStream;
-  import java.io.PrintStream;
 %}
+ 
 
-/* ---------- TOKENS ---------- */
-%token ID INT FLOAT BOOL NUM LIT VOID MAIN READ WRITE IF ELSE DO FOR
-%token WHILE TRUE FALSE
-%token EQ LEQ GEQ NEQ
-%token AND OR
-%token INC DEC
-%token PLUSEQ MINUSEQ MULEQ DIVEQ MODEQ
-%token BREAK CONTINUE          /* ADICIONADO */
+%token ID, INT, FLOAT, BOOL, NUM, LIT, VOID, MAIN, READ, WRITE, IF, ELSE
+%token WHILE,TRUE, FALSE, IF, ELSE
+%token DO
+%token FOR
+%token EQ, LEQ, GEQ, NEQ 
+%token AND, OR
+%token INC, DEC, ADDEQ
+%token BREAK, CONTINUE
 
-%right '=' PLUSEQ MINUSEQ MULEQ DIVEQ MODEQ
-%right '?' ':'            /* operador condicional */
+%right '='
+%right '?' ':'        /* condicional ternário */
 %left OR
 %left AND
-%left '>' '<' EQ LEQ GEQ NEQ
+%left  '>' '<' EQ LEQ GEQ NEQ
 %left '+' '-'
 %left '*' '/' '%'
-%left '!' INC DEC
+%left '!' 
 
-/* ---------- TIPOS SEMÂNTICOS ---------- */
-%type <sval> ID LIT NUM
-%type <sval> for_cond for_update
+%type <sval> ID
+%type <sval> LIT
+%type <sval> NUM
 %type <ival> type
+
+
 %%
-/* --- PROGRAMA --- */
+
 prog : { geraInicio(); } dList mainF { geraAreaDados(); geraAreaLiterais(); } ;
 
-/* --- FUNÇÃO MAIN --- */
-mainF : VOID MAIN '(' ')' { System.out.println("_start:"); }
-      '{' lcmd { geraFinal(); } '}'  ;
+mainF : VOID MAIN '(' ')'   { System.out.println("_start:"); }
+        '{' lcmd  { geraFinal(); } '}'
+      ; 
 
-/* --- DECLARAÇÕES --- */
-dList : decl dList | ;
-decl : type ID ';' {
-          TS_entry nodo = ts.pesquisa($2);
-          if (nodo != null)
-              yyerror("(sem) variavel >" + $2 + "< jah declarada");
-          else ts.insert(new TS_entry($2, $1));
-        } ;
-type : INT   { $$ = INT; }
-     | FLOAT { $$ = FLOAT; }
-     | BOOL  { $$ = BOOL; } ;
+dList : decl dList 
+      | 
+      ;
 
-/* --- COMANDOS --- */
-lcmd : lcmd cmd | ;
-cmd : exp ';' {
-        /* Consome o valor da expressão da pilha para evitar lixo e stack imbalance. */
-        System.out.println("\tPOPL %EAX");
-      }
-    | WRITE '(' LIT ',' exp ')' ';' {
-          strTab.add($3);
-          System.out.println("\tMOVL $_str_"+strCount+"Len, %EDX");
-          System.out.println("\tMOVL $_str_"+strCount+", %ECX");
-          System.out.println("\tCALL _writeLit");
-          strCount++;
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tCALL _write");
-          System.out.println("\tCALL _writeln");
-      }
-    | WRITE '(' LIT ')' ';' {
-          strTab.add($3);
-          System.out.println("\tMOVL $_str_"+strCount+"Len, %EDX");
-          System.out.println("\tMOVL $_str_"+strCount+", %ECX");
-          System.out.println("\tCALL _writeLit");
-          System.out.println("\tCALL _writeln");
-          strCount++;
-      }
-    | READ '(' ID ')' ';' {
-          System.out.println("\tPUSHL $_"+$3);
-          System.out.println("\tCALL _read");
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-      }
-    | WHILE {
-          /* Aloca 3 rótulos: base (teste), base+1 (fim/break), base+2 (continue) */
-          int base = proxRot;
-          proxRot += 3;
-          pRot.push(base);
-          System.out.printf("rot_%02d:\n", base);     /* Rótulo de início (teste) */
-          /* NÃO imprimir rot_base+2 aqui - será impresso no lugar certo ao gerar continue/update */
-      } '(' exp ')' {
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tCMPL $0, %EAX");
-          System.out.printf("\tJE rot_%02d\n", pRot.peek() + 1); /* Salto p/ fim (break) */
-      } cmd {
-            /* rótulo do CONTINUE (base+2) */
-            System.out.printf("rot_%02d:\n", pRot.peek() + 2);
-
-            /* volta ao início do while */
-            System.out.printf("\tJMP rot_%02d\n", pRot.peek());
-
-            /* rótulo de fim (break) */
-            System.out.printf("rot_%02d:\n", pRot.peek() + 1);
-
-            pRot.pop();
-     }
-    | DO {
-          /* Aloca 3 rótulos: base (corpo), base+1 (fim/break), base+2 (teste/continue) */
-          int base = proxRot;
-          proxRot += 3;
-          pRot.push(base);
-          System.out.printf("rot_%02d:\n", base); /* Início do corpo */
-      } cmd {
-          /* Destino do 'continue' será o teste/atualização (rot_base+2) -- imprimimos esse rótulo aqui */
-          System.out.printf("rot_%02d:\n", pRot.peek() + 2); /* Destino do 'continue' */
-      } WHILE '(' exp ')' ';' {
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tCMPL $0, %EAX");
-          System.out.printf("\tJNE rot_%02d\n", pRot.peek());     /* Volta ao início (base) */
-          System.out.printf("rot_%02d:\n", pRot.peek() + 1); /* Rótulo de fim (break) */
-          pRot.pop();
-      }
-
-   | FOR '(' 
-      {
-          /* reset indispensável para evitar vazamento entre for's */
-          currentCondCode = "";
-          currentUpdateCode = "";
-      }
-      for_init ';' for_cond ';' for_update ')'
-      {
-          int base = proxRot;
-          proxRot += 3;
-          pRot.push(base);
-
-          System.out.printf("rot_%02d:\n", base);
-
-          if (!currentCondCode.equals("")) {
-              System.out.print(currentCondCode);
-              System.out.println("\tPOPL %EAX");
-              System.out.println("\tCMPL $0, %EAX");
-              System.out.printf("\tJE rot_%02d\n", base + 1);
-          }
-      }
-      cmd
-      {
-          int base = pRot.peek();
-          System.out.printf("rot_%02d:\n", base + 2);
-          System.out.print(currentUpdateCode);
-          System.out.printf("\tJMP rot_%02d\n", base);
-          System.out.printf("rot_%02d:\n", base + 1);
-
-          pRot.pop();
-          /* aqui o reset continua, sem problemas */
-          currentCondCode = "";
-          currentUpdateCode = "";
-      }
-
-
-    | IF '(' exp {
-          /* Use pilha separada para IFs para não conflitar com pRot (que é usada por laços) */
-          pIf.push(proxRot); proxRot += 2;
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tCMPL $0, %EAX");
-          System.out.printf("\tJE rot_%02d\n", pIf.peek());
-      } ')' cmd restoIf {
-          System.out.printf("rot_%02d:\n", pIf.peek() + 1);
-          pIf.pop();
-      }
-    | '{' lcmd '}'
-    | BREAK ';' {
-          if (pRot.isEmpty())
-              yyerror("break fora de laco");
-          else {
-              /* Salta para o rótulo de FIM (base+1) */
-              System.out.printf("\tJMP rot_%02d\n", pRot.peek() + 1);
-          }
-      }
-    | CONTINUE ';' {
-          if (pRot.isEmpty())
-              yyerror("continue fora de laco");
-          else {
-              /* Salta para o rótulo de UPDATE/TESTE (base+2) */
-              System.out.printf("\tJMP rot_%02d\n", pRot.peek() + 2);
-          }
-      }
-    ;
-
-/* ----------------- FOR helpers ----------------- */
-for_init :
-      exp {
-          /* consome o valor que a expressão deixou na pilha (para não deixar lixo) */
-          System.out.println("\tPOPL %EAX");
-      }
-    | /* vazio */ ;
-
-for_cond :
-      {
-          /* captura a saída do System.out gerada pela avaliação da condição */
-          condBaos = new ByteArrayOutputStream();
-          condOldOut = System.out;
-          System.setOut(new PrintStream(condBaos));
-      } 
-      exp 
-      {
-          System.setOut(condOldOut);
-          /* remove eventual PUSHL final deixado pela expressão (evita empilhar lixo toda iteração) */
-          String code = condBaos.toString();
-          int idx = code.lastIndexOf("\n\tPUSHL %EAX");
-          if (idx >= 0) {
-              /* remove o PUSHL final (mantém newline anterior) */
-              code = code.substring(0, idx);
-              if (!code.endsWith("\n")) code += "\n";
-          }
-          currentCondCode = code;
-      }
-    | {
-          currentCondCode = "";
-      }
-    ;
-
-for_update :
-      {
-          /* captura update (para imprimir somente após o corpo) */
-          updateBaos = new ByteArrayOutputStream();
-          updateOldOut = System.out;
-          System.setOut(new PrintStream(updateBaos));
-      } 
-      exp 
-      {
-          System.setOut(updateOldOut);
-          /* remove eventual PUSHL final deixado pela expressão (evita empilhar lixo) */
-          String code = updateBaos.toString();
-          int idx = code.lastIndexOf("\n\tPUSHL %EAX");
-          if (idx >= 0) {
-              code = code.substring(0, idx);
-              if (!code.endsWith("\n")) code += "\n";
-          }
-          currentUpdateCode = code;
-      }
-    | {
-          currentUpdateCode = "";
-      }
-    ;
-
-/* --- RESTO IF --- */
-restoIf : ELSE {
-          System.out.printf("\tJMP rot_%02d\n", pIf.peek() + 1);
-          System.out.printf("rot_%02d:\n", pIf.peek());
-      } cmd
-        | {
-          System.out.printf("\tJMP rot_%02d\n", pIf.peek() + 1);
-          System.out.printf("rot_%02d:\n", pIf.peek());
+decl : type ID ';' 
+      {  
+        TS_entry nodo = ts.pesquisa($2);
+        if (nodo != null) 
+            yyerror("(sem) variavel >" + $2 + "< jah declarada");
+        else 
+            ts.insert(new TS_entry($2, $1)); 
       }
       ;
 
-/* --- LVALUE (apenas endereço) --- */
-lvalue : ID { System.out.println("\tPUSHL $_"+$1); } ;
+type : INT    { $$ = INT; }
+     | FLOAT  { $$ = FLOAT; }
+     | BOOL   { $$ = BOOL; }
+     ;
 
-/* --- EXPRESSÕES --- */
-exp : NUM { System.out.println("\tPUSHL $"+$1); }
-    | TRUE { System.out.println("\tPUSHL $1"); }
-    | FALSE { System.out.println("\tPUSHL $0"); }
-    | ID { System.out.println("\tPUSHL _"+$1); }
-    | '(' exp ')'
-    | '!' exp { gcExpNot(); }
-    /* PRÉ-INCREMENTO */
-    | INC ID {
-          System.out.println("\tPUSHL $_"+$2);
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tMOVL (%EDX), %EAX");
-          System.out.println("\tADDL $1, %EAX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-          System.out.println("\tPUSHL %EAX");
+lcmd : lcmd cmd
+     |
+     ;
+	   
+
+/* 
+ * comando = expressao seguida de ';'
+ * (inclusive atribuicao, pois '=' entrou em exp)
+ */
+cmd :  exp ';'
+
+    | '{' lcmd '}' 
+      { 
+        System.out.println("\t\t# terminou o bloco..."); 
       }
-    /* PRÉ-DECREMENTO */
-    | DEC ID {
-          System.out.println("\tPUSHL $_"+$2);
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tMOVL (%EDX), %EAX");
-          System.out.println("\tSUBL $1, %EAX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-          System.out.println("\tPUSHL %EAX");
+					     
+    | WRITE '(' LIT ')' ';' 
+      { 
+        strTab.add($3);
+        System.out.println("\tMOVL $_str_"+strCount+"Len, %EDX"); 
+        System.out.println("\tMOVL $_str_"+strCount+", %ECX"); 
+        System.out.println("\tCALL _writeLit"); 
+        System.out.println("\tCALL _writeln"); 
+        strCount++;
       }
-    /* PÓS-INCREMENTO */
-    | ID INC {
-          System.out.println("\tPUSHL _"+$1);
-          System.out.println("\tPUSHL $_"+$1);
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tADDL $1, %EAX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-          System.out.println("\tSUBL $1, %EAX");
-          System.out.println("\tPUSHL %EAX");
+      
+    | WRITE '(' LIT 
+      { 
+        strTab.add($3);
+        System.out.println("\tMOVL $_str_"+strCount+"Len, %EDX"); 
+        System.out.println("\tMOVL $_str_"+strCount+", %ECX"); 
+        System.out.println("\tCALL _writeLit"); 
+        strCount++;
       }
-    /* PÓS-DECREMENTO */
-    | ID DEC {
-          System.out.println("\tPUSHL _"+$1);
-          System.out.println("\tPUSHL $_"+$1);
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tSUBL $1, %EAX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-          System.out.println("\tADDL $1, %EAX");
-          System.out.println("\tPUSHL %EAX");
+      ',' exp ')' ';' 
+      { 
+        System.out.println("\tPOPL %EAX"); 
+        System.out.println("\tCALL _write");	
+        System.out.println("\tCALL _writeln"); 
       }
-    /* ATRIBUIÇÃO SIMPLES */
-    | lvalue '=' exp {
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tMOVL %EAX, (%EDX)");
-          System.out.println("\tPUSHL %EAX");
+         
+    | READ '(' ID ')' ';'								
+      {
+        System.out.println("\tPUSHL $_"+$3);
+        System.out.println("\tCALL _read");
+        System.out.println("\tPOPL %EDX");
+        System.out.println("\tMOVL %EAX, (%EDX)");
       }
-   /* ATRIBUIÇÕES COMPOSTAS - PLUSEQ corrigido */
-    | ID
-    { /* quando reduzimos o ID do LHS: empilha endereço e, em seguida, o valor atual
-         assim preservamos o "old LHS value" antes que o RHS seja avaliado */
-      System.out.println("\tPUSHL $_" + $1);
-      System.out.println("\tPUSHL _" + $1);
-    }
-  PLUSEQ exp
-    {
-      /* pilha agora (top -> bottom): RHS_value, old_value, address
-         queremos: result = old_value + RHS_value
-      */
-      System.out.println("\tPOPL %EAX"); /* RHS_value */
-      System.out.println("\tPOPL %EBX"); /* old_value */
-      System.out.println("\tPOPL %EDX"); /* endereço (LHS) */
-      System.out.println("\tADDL %EBX, %EAX"); /* EAX = RHS + old */
-      System.out.println("\tMOVL %EAX, (%EDX)");  /* grava no LHS */
-      System.out.println("\tPUSHL %EAX"); /* empilha resultado como valor da expressão */
-    }
-    | lvalue MINUSEQ exp {
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tMOVL (%EDX), %EBX");
-          System.out.println("\tSUBL %EAX, %EBX");
-          System.out.println("\tMOVL %EBX, (%EDX)");
-          System.out.println("\tPUSHL %EBX");
+	
+    | BREAK ';'
+      {
+        if (pBreak.empty())
+            yyerror("(sem) comando 'break' fora de laco");
+        else
+            System.out.printf("\tJMP rot_%02d   # break\n", pBreak.peek());
       }
-    | lvalue MULEQ exp {
-          System.out.println("\tPOPL %EAX");
-          System.out.println("\tPOPL %EDX");
-          System.out.println("\tMOVL (%EDX), %EBX");
-          System.out.println("\tIMULL %EAX, %EBX");
-          System.out.println("\tMOVL %EBX, (%EDX)");
-          System.out.println("\tPUSHL %EBX");
+
+    | CONTINUE ';'
+      {
+        if (pContinue.empty())
+            yyerror("(sem) comando 'continue' fora de laco");
+        else
+            System.out.printf("\tJMP rot_%02d   # continue\n", pContinue.peek());
       }
-    | lvalue DIVEQ exp {
-          /* Preserve endereço em %EBX; divisor em %ECX */
-          System.out.println("\tPOPL %ECX"); /* divisor */
-          System.out.println("\tPOPL %EBX"); /* endereço */
-          System.out.println("\tMOVL (%EBX), %EAX");
-          System.out.println("\tMOVL $0, %EDX");
-          System.out.println("\tIDIVL %ECX");
-          System.out.println("\tMOVL %EAX, (%EBX)");
-          System.out.println("\tPUSHL %EAX");
+
+    /* DO { cmd } WHILE (exp); */
+    | DO 
+      {
+        pRot.push(proxRot);             // rótulo início do do-while
+        pContinue.push(pRot.peek());    // continue -> volta para o início
+        pBreak.push(pRot.peek()+1);     // break -> vai para o fim
+        System.out.printf("rot_%02d:\n", pRot.peek());
+        proxRot += 2;                   // reserva rot_fim = inicio+1
       }
-    | lvalue MODEQ exp {
-          /* Preserve endereço em %EBX; divisor em %ECX */
-          System.out.println("\tPOPL %ECX"); /* divisor */
-          System.out.println("\tPOPL %EBX"); /* endereço */
-          System.out.println("\tMOVL (%EBX), %EAX");
-          System.out.println("\tMOVL $0, %EDX");
-          System.out.println("\tIDIVL %ECX");
-          System.out.println("\tMOVL %EDX, %EAX"); /* resto em EAX */
-          System.out.println("\tMOVL %EAX, (%EBX)");
-          System.out.println("\tPUSHL %EAX");
+      cmd
+      WHILE '(' exp ')' ';'
+      {
+        System.out.println("\tPOPL %EAX   # do-while testa no final");
+        System.out.println("\tCMPL $0, %EAX");
+        System.out.printf ("\tJNE rot_%02d\n", pRot.peek());
+        System.out.printf("rot_%02d:\n", (int)pRot.peek()+1);
+        pRot.pop();
+        pContinue.pop();
+        pBreak.pop();
       }
-    /* OPERADOR CONDICIONAL (?:) - usa rótulos locais sem empilhar em pRot/pIf */
-    | exp '?' exp ':' exp {
-          System.out.println("\tPOPL %EAX"); // exp_false
-          System.out.println("\tPOPL %EBX"); // exp_true
-          System.out.println("\tPOPL %ECX"); // cond
-          System.out.println("\tCMPL $0, %ECX");
-          int _base = proxRot; proxRot += 2;
-          System.out.printf("\tJE rot_%02d\n", _base);
-          System.out.println("\tMOVL %EBX, %EAX");
-          System.out.printf("\tJMP rot_%02d\n", _base + 1);
-          System.out.printf("rot_%02d:\n", _base);
-          /* nada a fazer além de deixar EAX com o valor correto (exp_false já estava em EAX) */
-          System.out.printf("rot_%02d:\n", _base + 1);
-          System.out.println("\tPUSHL %EAX");
+
+    /* WHILE (exp) cmd */
+    | WHILE 
+      {
+        pRot.push(proxRot);         // rótulo início do while
+        proxRot += 2;               // reserva também o rótulo de fim (inicio+1)
+        pContinue.push(pRot.peek());        // continue -> volta para o início
+        pBreak.push(pRot.peek()+1);         // break -> fim
+        System.out.printf("rot_%02d:\n", pRot.peek());
+      } 
+      '(' exp ')' 
+      {
+        System.out.println("\tPOPL %EAX   # desvia se falso...");
+        System.out.println("\tCMPL $0, %EAX");
+        System.out.printf("\tJE rot_%02d\n", (int)pRot.peek()+1);
+      } 
+      cmd 
+      {
+        System.out.printf("\tJMP rot_%02d   # terminou cmd na linha de cima\n", pRot.peek());
+        System.out.printf("rot_%02d:\n", (int)pRot.peek()+1);
+        pRot.pop();
+        pContinue.pop();
+        pBreak.pop();
+      }  
+							
+    /* IF (exp) cmd restoIf */
+    | IF '(' exp 
+      {	
+        pRot.push(proxRot);  proxRot += 2;
+        System.out.println("\tPOPL %EAX");
+        System.out.println("\tCMPL $0, %EAX");
+        System.out.printf("\tJE rot_%02d\n", pRot.peek());
       }
-    /* OPERAÇÕES ARITMÉTICAS */
-    | exp '+' exp { gcExpArit('+'); }
-    | exp '-' exp { gcExpArit('-'); }
-    | exp '*' exp { gcExpArit('*'); }
-    | exp '/' exp { gcExpArit('/'); }
-    | exp '%' exp { gcExpArit('%'); }
-    /* RELACIONAIS */
-    | exp '>' exp { gcExpRel('>'); }
-    | exp '<' exp { gcExpRel('<'); }
-    | exp EQ exp { gcExpRel(EQ); }
-    | exp LEQ exp { gcExpRel(LEQ); }
-    | exp GEQ exp { gcExpRel(GEQ); }
-    | exp NEQ exp { gcExpRel(NEQ); }
-    /* LÓGICAS */
-    | exp OR exp { gcExpLog(OR); }
-    | exp AND exp { gcExpLog(AND); }
+      ')' cmd 
+      restoIf 
+      {
+        System.out.printf("rot_%02d:\n",pRot.peek()+1);
+        pRot.pop();
+      }
+
+    /* FOR ( init ; cond ; incr ) cmd */
+    | FOR '(' for_init ';'
+      {
+        int Lcond = proxRot++;
+        int Lbody = proxRot++;
+        int Lcont = proxRot++;
+        int Lend  = proxRot++;
+
+        pForCond.push(Lcond);   // cond
+        pForBody.push(Lbody);   // corpo
+        pForIncr.push(Lcont);   // incremento / continue
+        pBreak.push(Lend);      // break
+        pContinue.push(Lcont);  // continue
+
+        /* depois da inicializacao, pula para a condicao */
+        System.out.printf("\tJMP rot_%02d\n", Lcond);
+      }
+      for_cond ';'
+      for_incr ')'
+      {
+        /* rótulo do corpo: proximo código é o cmd */
+        System.out.printf("rot_%02d:\n", pForBody.peek());
+      }
+      cmd
+      {
+        /* fim do corpo: vai para o incremento (continue também cai lá) */
+        System.out.printf("\tJMP rot_%02d\n", pForIncr.peek());
+
+        /* rótulo de saída do for */
+        System.out.printf("rot_%02d:\n", pBreak.peek());
+
+        pForIncr.pop();
+        pForCond.pop();
+        pForBody.pop();
+        pBreak.pop();
+        pContinue.pop();
+      }
+
     ;
+     
+restoIf 
+    : ELSE  
+      {
+        System.out.printf("\tJMP rot_%02d\n", pRot.peek()+1);
+        System.out.printf("rot_%02d:\n",pRot.peek());
+      } 							
+      cmd  
+							
+    | {
+        System.out.printf("\tJMP rot_%02d\n", pRot.peek()+1);
+        System.out.printf("rot_%02d:\n",pRot.peek());
+      } 
+    ;										
+
+/* 1a expressao do for: INICIALIZACAO (resultado descartado) */
+for_init :
+      /* vazio */
+    | exp  
+      { 
+        System.out.println("\tPOPL %EAX   # descarta resultado da inicializacao do for"); 
+      }
+    ;
+
+/* 2a expressao: CONDICAO (pode ser vazia) */
+for_cond :
+      /* vazio */
+      {
+        /* condicao vazia: sempre verdadeira */
+        int Lcond = pForCond.peek();
+        int Lbody = pForBody.peek();
+        System.out.printf("rot_%02d:\n", Lcond);
+        System.out.printf("\tJMP rot_%02d\n", Lbody);
+      }
+    |
+      { 
+        /* label da condicao vem ANTES da expressao */
+        int Lcond = pForCond.peek();
+        System.out.printf("rot_%02d:\n", Lcond);
+      }
+      exp
+      {
+        System.out.println("\tPOPL %EAX   # condicao do for");
+        System.out.println("\tCMPL $0, %EAX");
+        System.out.printf("\tJE rot_%02d\n", pBreak.peek());      // sai do for se falso
+        System.out.printf("\tJMP rot_%02d\n", pForBody.peek());   // vai pro corpo se verdadeiro
+      }
+    ;
+
+/* 3a expressao: INCREMENTO (pode ser vazia) */
+for_incr :
+      /* vazio */
+      {
+        int Lcont = pForIncr.peek();
+        int Lcond = pForCond.peek();
+        System.out.printf("rot_%02d:\n", Lcont);
+        System.out.printf("\tJMP rot_%02d\n", Lcond);
+      }
+    |
+      { 
+        int Lcont = pForIncr.peek();
+        System.out.printf("rot_%02d:\n", Lcont);
+      }
+      exp
+      {
+        System.out.println("\tPOPL %EAX   # incremento do for");
+        System.out.printf("\tJMP rot_%02d\n", pForCond.peek());
+      }
+    ;
+
+exp :  NUM   
+        { System.out.println("\tPUSHL $"+$1); } 
+
+    |  TRUE  
+        { System.out.println("\tPUSHL $1"); } 
+
+    |  FALSE 
+        { System.out.println("\tPUSHL $0"); }      
+
+    |  ID    
+        { System.out.println("\tPUSHL _"+$1); }
+
+    | '(' exp	')' 
+
+    | '!' exp       
+        { gcExpNot(); }
+
+      /* PRÉ-incremento/decremento: ++a, --a */
+    | INC ID        
+        { gcPreInc($2); }
+
+    | DEC ID        
+        { gcPreDec($2); }
+
+      /* PÓS-incremento/decremento: a++, a-- */
+    | ID INC        
+        { gcPosInc($1); }
+
+    | ID DEC        
+        { gcPosDec($1); }
+
+    | ID ADDEQ exp   
+        { gcAtribAdd($1); }
+
+    | exp '+' exp		
+        { gcExpArit('+'); }
+
+    | exp '-' exp		
+        { gcExpArit('-'); }
+
+    | exp '*' exp		
+        { gcExpArit('*'); }
+
+    | exp '/' exp		
+        { gcExpArit('/'); }
+
+    | exp '%' exp		
+        { gcExpArit('%'); }
+																			
+    | exp '>' exp		
+        { gcExpRel('>'); }
+
+    | exp '<' exp		
+        { gcExpRel('<'); }											
+
+    | exp EQ  exp		
+        { gcExpRel(EQ); }											
+
+    | exp LEQ exp		
+        { gcExpRel(LEQ); }											
+
+    | exp GEQ exp		
+        { gcExpRel(GEQ); }											
+
+    | exp NEQ exp		
+        { gcExpRel(NEQ); }											
+
+    | exp OR  exp		
+        { gcExpLog(OR); }											
+
+    | exp AND exp		
+        { gcExpLog(AND); }			
+
+    /* condicional ternário: cond ? exp1 : exp2 */
+    | exp '?' exp ':' exp 
+        { gcTernario(); }
+
+    /* atribuicao como expressao */
+    | ID '=' exp          
+        { gcAtrib($1); }
+		
+    ;							
+
+
 %%
-/* ---------- ATRIBUTOS E MÉTODOS JAVA ---------- */
-private Yylex lexer;
-private TabSimb ts = new TabSimb();
-private int strCount = 0;
-private ArrayList<String> strTab = new ArrayList<>();
-private Stack<Integer> pRot = new Stack<>();   /* pilha para laços (for/while/do) */
-private Stack<Integer> pIf  = new Stack<>();   /* pilha separada para IF/ELSE rótulos */
-private int proxRot = 1;
-private String currentCondCode = "";
-private String currentUpdateCode = "";
-private ByteArrayOutputStream condBaos;
-private PrintStream condOldOut;
-private ByteArrayOutputStream updateBaos;
-private PrintStream updateOldOut;
 
-private int yylex() {
-    int ret;
+  private Yylex lexer;
+
+  private TabSimb ts = new TabSimb();
+
+  private int strCount = 0;
+  private ArrayList<String> strTab = new ArrayList<String>();
+
+  private Stack<Integer> pRot = new Stack<Integer>();
+  private int proxRot = 1;
+
+  private Stack<Integer> pBreak = new Stack<Integer>();
+  private Stack<Integer> pContinue = new Stack<Integer>();
+
+  private Stack<Integer> pForIncr = new Stack<Integer>();
+  private Stack<Integer> pForCond = new Stack<Integer>();
+  private Stack<Integer> pForBody = new Stack<Integer>();
+
+  public static int ARRAY = 100;
+
+
+  private int yylex () {
+    int yyl_return = -1;
     try {
-        yylval = new ParserVal(0);
-        ret = lexer.yylex();
-    } catch (IOException e) {
-        System.err.println("IO error: " + e);
-        ret = -1;
+      yylval = new ParserVal(0);
+      yyl_return = lexer.yylex();
     }
-    return ret;
-}
-public void yyerror(String s) {
-    System.err.println("Error: " + s + " linha: " + lexer.getLine());
-}
-public Parser(Reader r) {
-    lexer = new Yylex(r, this);
-}
-public void setDebug(boolean d) { yydebug = d; }
-public void listarTS() { ts.listar(); }
-public static void main(String[] args) throws IOException {
-    if (args.length > 0) {
-        new Parser(new FileReader(args[0])).yyparse();
-    } else {
-        System.out.println("Uso: java Parser arquivo.cmm > arquivo.s");
+    catch (IOException e) {
+      System.err.println("IO error :"+e);
     }
-}
+    return yyl_return;
+  }
 
-/* ---------- GERAÇÃO DE CÓDIGO ---------- */
-void gcExpArit(int op) {
+
+  public void yyerror (String error) {
+    System.err.println ("Error: " + error + "  linha: " + lexer.getLine());
+  }
+
+
+  public Parser(Reader r) {
+    lexer = new Yylex(r, this);
+  }  
+
+  public void setDebug(boolean debug) {
+    yydebug = debug;
+  }
+
+  public void listarTS() { ts.listar();}
+
+  public static void main(String args[]) throws IOException {
+
+    Parser yyparser;
+    if ( args.length > 0 ) {
+      // parse a file
+      yyparser = new Parser(new FileReader(args[0]));
+      yyparser.yyparse();
+      // yyparser.listarTS();
+
+    }
+    else {
+      // interactive mode
+      System.out.println("\n\tFormato: java Parser entrada.cmm >entrada.s\n");
+    }
+
+  }
+
+  void gcExpArit(int oparit) {
     System.out.println("\tPOPL %EBX");
     System.out.println("\tPOPL %EAX");
-    switch (op) {
-        case '+': System.out.println("\tADDL %EBX, %EAX"); break;
-        case '-': System.out.println("\tSUBL %EBX, %EAX"); break;
-        case '*': System.out.println("\tIMULL %EBX, %EAX"); break;
-        case '/': case '%':
-            System.out.println("\tMOVL $0, %EDX");
-            System.out.println("\tIDIVL %EBX");
-            if (op == '%') System.out.println("\tMOVL %EDX, %EAX");
-            break;
+
+    switch (oparit) {
+      case '+' : System.out.println("\tADDL %EBX, %EAX" ); break;
+      case '-' : System.out.println("\tSUBL %EBX, %EAX" ); break;
+      case '*' : System.out.println("\tIMULL %EBX, %EAX" ); break;
+
+      case '/': 
+        System.out.println("\tMOVL $0, %EDX");
+        System.out.println("\tIDIVL %EBX");
+        break;
+
+      case '%': 
+        System.out.println("\tMOVL $0, %EDX");
+        System.out.println("\tIDIVL %EBX");
+        System.out.println("\tMOVL %EDX, %EAX");
+        break;
     }
     System.out.println("\tPUSHL %EAX");
-}
-public void gcExpRel(int op) {
+  }
+
+  /* atribuicao como expressao */
+  void gcAtrib(String id) {
+    System.out.println("\tPOPL %EDX");           // valor da RHS
+    System.out.println("\tMOVL %EDX, _" + id);   // grava na variavel
+    System.out.println("\tPUSHL %EDX");          // reempilha valor atribuido
+  }
+
+  /* pre/pós incremento/decremento */
+
+  // ++a  -> incrementa a, empilha novo valor
+  void gcPreInc(String id) {
+    System.out.println("\tMOVL _" + id + ", %EAX");
+    System.out.println("\tADDL $1, %EAX");
+    System.out.println("\tMOVL %EAX, _" + id);
+    System.out.println("\tPUSHL %EAX");
+  }
+
+  // --a  -> decrementa a, empilha novo valor
+  void gcPreDec(String id) {
+    System.out.println("\tMOVL _" + id + ", %EAX");
+    System.out.println("\tSUBL $1, %EAX");
+    System.out.println("\tMOVL %EAX, _" + id);
+    System.out.println("\tPUSHL %EAX");
+  }
+
+  // a++  -> empilha valor antigo, depois incrementa variável
+  void gcPosInc(String id) {
+    System.out.println("\tPUSHL _" + id);          // valor antigo vira resultado da expressão
+    System.out.println("\tMOVL _" + id + ", %EAX");
+    System.out.println("\tADDL $1, %EAX");
+    System.out.println("\tMOVL %EAX, _" + id);
+  }
+
+  // a--  -> empilha valor antigo, depois decrementa variável
+  void gcPosDec(String id) {
+    System.out.println("\tPUSHL _" + id);          // valor antigo vira resultado da expressão
+    System.out.println("\tMOVL _" + id + ", %EAX");
+    System.out.println("\tSUBL $1, %EAX");
+    System.out.println("\tMOVL %EAX, _" + id);
+  }
+
+  void gcAtribAdd(String id) {
+    System.out.println("\tPOPL %EDX");         // RHS
+    System.out.println("\tMOVL _" + id + ", %EAX");  // carrega LHS
+    System.out.println("\tADDL %EDX, %EAX");   // soma
+    System.out.println("\tMOVL %EAX, _" + id); // grava em id
+    System.out.println("\tPUSHL %EAX");        // reempilha resultado
+  }
+
+  /* operador condicional ternário (cond ? e1 : e2) */
+  void gcTernario() {
+    int rFalse = proxRot++;
+    int rEnd   = proxRot++;
+
+    // pilha (topo -> base): e2, e1, cond
+    System.out.println("\tPOPL %EAX   # expr_falsa");
+    System.out.println("\tPOPL %EBX   # expr_verdadeira");
+    System.out.println("\tPOPL %ECX   # condicao");
+    System.out.println("\tCMPL $0, %ECX");
+    System.out.printf ("\tJE rot_%02d\n", rFalse);
+    System.out.println("\tMOVL %EBX, %EAX");              // cond != 0 -> resultado = verdadeira
+    System.out.printf ("\tJMP rot_%02d\n", rEnd);
+    System.out.printf("rot_%02d:\n", rFalse);             // cond == 0 -> fica com falsa em %EAX
+    System.out.printf("rot_%02d:\n", rEnd);
+    System.out.println("\tPUSHL %EAX");                   // empilha resultado da expressão
+  }
+
+  public void gcExpRel(int oprel) {
+
     System.out.println("\tPOPL %EAX");
     System.out.println("\tPOPL %EDX");
     System.out.println("\tCMPL %EAX, %EDX");
     System.out.println("\tMOVL $0, %EAX");
-    switch (op) {
-        case '<': System.out.println("\tSETL %AL"); break;
-        case '>': System.out.println("\tSETG %AL"); break;
-        case Parser.EQ: System.out.println("\tSETE %AL"); break;
-        case Parser.GEQ: System.out.println("\tSETGE %AL"); break;
-        case Parser.LEQ: System.out.println("\tSETLE %AL"); break;
-        case Parser.NEQ: System.out.println("\tSETNE %AL"); break;
+    
+    switch (oprel) {
+      case '<':        System.out.println("\tSETL  %AL"); break;
+      case '>':        System.out.println("\tSETG  %AL"); break;
+      case Parser.EQ:  System.out.println("\tSETE  %AL"); break;
+      case Parser.GEQ: System.out.println("\tSETGE %AL"); break;
+      case Parser.LEQ: System.out.println("\tSETLE %AL"); break;
+      case Parser.NEQ: System.out.println("\tSETNE %AL"); break;
     }
+    
     System.out.println("\tPUSHL %EAX");
-}
-public void gcExpLog(int op) {
+  }
+
+  public void gcExpLog(int oplog) {
+
     System.out.println("\tPOPL %EDX");
     System.out.println("\tPOPL %EAX");
+
     System.out.println("\tCMPL $0, %EAX");
     System.out.println("\tMOVL $0, %EAX");
     System.out.println("\tSETNE %AL");
     System.out.println("\tCMPL $0, %EDX");
     System.out.println("\tMOVL $0, %EDX");
     System.out.println("\tSETNE %DL");
-    if (op == Parser.OR) System.out.println("\tORL %EDX, %EAX");
-    else System.out.println("\tANDL %EDX, %EAX");
+
+    switch (oplog) {
+      case Parser.OR:  
+        System.out.println("\tORL  %EDX, %EAX");  
+        break;
+      case Parser.AND: 
+        System.out.println("\tANDL %EDX, %EAX"); 
+        break;
+    }
+
     System.out.println("\tPUSHL %EAX");
-}
-public void gcExpNot() {
-    System.out.println("\tPOPL %EAX");
-    System.out.println("\tCMPL $0, %EAX");
-    System.out.println("\tMOVL $0, %EAX");
-    System.out.println("\tSETE %AL");
+  }
+
+  public void gcExpNot(){
+    System.out.println("\tPOPL %EAX" );
+    System.out.println("\tNEGL %EAX" );
     System.out.println("\tPUSHL %EAX");
-}
-private void geraInicio() {
-    System.out.println(".text\n.GLOBL _start\n");
-}
-private void geraFinal() {
-    System.out.println("\n\tmov $0, %ebx");
+  }
+
+  private void geraInicio() {
+    System.out.println(".text\n\n#\t nome COMPLETO e matricula dos componentes do grupo...\n#\n"); 
+    System.out.println(".GLOBL _start\n\n");  
+  }
+
+  private void geraFinal(){
+	
+    System.out.println("\n\n");
+    System.out.println("#");
+    System.out.println("# devolve o controle para o SO (final da main)");
+    System.out.println("#");
+    System.out.println("\tmov $0, %ebx");
     System.out.println("\tmov $1, %eax");
-    System.out.println("\tint $0x80\n");
-    // Biblioteca IO
+    System.out.println("\tint $0x80");
+	
+    System.out.println("\n");
+    System.out.println("#");
+    System.out.println("# Funcoes da biblioteca (IO)");
+    System.out.println("#");
+    System.out.println("\n");
     System.out.println("_writeln:");
     System.out.println("\tMOVL $__fim_msg, %ECX");
     System.out.println("\tDECL %ECX");
@@ -564,16 +666,34 @@ private void geraFinal() {
     System.out.println("\tNEGL %EAX");
     System.out.println("_fimread2:");
     System.out.println("\tRET");
-}
-private void geraAreaDados() {
+    System.out.println("\n");
+  }
+
+  private void geraAreaDados(){
+    System.out.println("");		
+    System.out.println("#");
+    System.out.println("# area de dados");
+    System.out.println("#");
     System.out.println(".data");
-    ts.geraGlobais();
-}
-private void geraAreaLiterais() {
-    System.out.println("__msg:\t.zero 30");
-    System.out.println("__fim_msg:\t.byte 0\n");
-    for (int i = 0; i < strTab.size(); i++) {
-        System.out.printf("_str_%d:\t.ascii \"%s\"\n", i, strTab.get(i));
-        System.out.printf("_str_%dLen = . - _str_%d\n", i, i);
-    }
-}
+    System.out.println("#");
+    System.out.println("# variaveis globais");
+    System.out.println("#");
+    ts.geraGlobais();	
+    System.out.println("");
+  }
+
+  private void geraAreaLiterais() { 
+
+    System.out.println("#\n# area de literais\n#");
+    System.out.println("__msg:");
+    System.out.println("\t.zero 30");
+    System.out.println("__fim_msg:");
+    System.out.println("\t.byte 0");
+    System.out.println("\n");
+
+    for (int i = 0; i<strTab.size(); i++ ) {
+      System.out.println("_str_"+i+":");
+      System.out.println("\t .ascii \""+strTab.get(i)+"\""); 
+      System.out.println("_str_"+i+"Len = . - _str_"+i);  
+    }		
+  }
