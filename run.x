@@ -16,8 +16,6 @@ java Parser $FILEPATH >$DIR/$ARQ.s
 as --32 -o $DIR/$ARQ.o $DIR/$ARQ.s
 ld -m elf_i386 -s -o $DIR/$ARQ   $DIR/$ARQ.o
 
-
-# 👉 Executa automaticamente o binário gerado
 echo "Executando $DIR/$ARQ..."
 $DIR/$ARQ
 
