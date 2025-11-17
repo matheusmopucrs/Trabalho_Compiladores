@@ -47,7 +47,6 @@ Para rodar todos (t01 a t08):
 O script `run.x` agora executa automaticamente o binário gerado. Foi adicionada a seguinte lógica:
 
 ```
-# 👉 Executa automaticamente o binário gerado
 echo "Executando $DIR/$ARQ..."
 $DIR/$ARQ
 ```
